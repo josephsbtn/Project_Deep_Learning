@@ -1,0 +1,18 @@
+# Core Computer Vision & AI
+ultralytics
+opencv-python
+supervision
+numpy
+
+# Web Service (API Backend)
+flask
+flask-cors
+
+# Laporan (Excel & PowerPoint)
+pandas
+openpyxl
+python-pptx
+
+# Utilitas
+pyyaml
+matplotlib
