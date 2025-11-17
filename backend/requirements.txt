@@ -1,18 +1,31 @@
-# Core Computer Vision & AI
-ultralytics
+# Flask Framework
+Flask
+Flask-CORS
+Werkzeug
+
+# Computer Vision & Deep Learning (Python 3.13 compatible)
 opencv-python
-supervision
 numpy
+ultralytics
+torch
+torchvision
 
-# Web Service (API Backend)
-flask
-flask-cors
+# Object Detection & Tracking
+supervision
 
-# Laporan (Excel & PowerPoint)
-pandas
-openpyxl
-python-pptx
+# Image Processing
+Pillow
 
-# Utilitas
-pyyaml
+# YOLO Dependencies
+PyYAML
 matplotlib
+scipy
+
+# Optional: For GPU support with CUDA 12.1 (uncomment if needed)
+# torch==2.5.1+cu121
+# torchvision==0.20.1+cu121
+# --extra-index-url https://download.pytorch.org/whl/cu121
+
+# Development Tools (optional)
+# python-dotenv==1.0.0
+# gunicorn==23.0.0  # for production deployment
