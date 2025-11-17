@@ -1,17 +1,22 @@
-/* Background */
+/* GLOBAL */
 body {
   margin: 0;
   padding: 0;
-  background: #eaf3ff;
+  background: #e7f1ff;
   font-family: "Segoe UI", Arial, sans-serif;
+  overflow-x: hidden;
 }
 
-/* Layout utama */
+/* LAYOUT UTAMA — fix posisi agar benar-benar center */
 .layout {
   display: flex;
+  justify-content: center;
+  align-items: flex-start;
   gap: 40px;
-  padding: 40px;
-  height: 100vh;
+
+  max-width: 1200px;       /* 🟦 Membatasi lebar UI */
+  margin: 0 auto;          /* 🟦 CENTER KANAN–KIRI */
+  padding: 50px 40px;      /* 🟦 Tambah ruang dari sisi browser */
   box-sizing: border-box;
 }
 
@@ -19,88 +24,103 @@ body {
 .left-panel {
   width: 360px;
   background: #ffffff;
-  padding: 24px;
-  border-radius: 20px;
+  padding: 26px;
+  border-radius: 22px;
   box-shadow: 0 6px 20px rgba(0, 0, 0, 0.08);
   display: flex;
   flex-direction: column;
-  gap: 18px;
+  gap: 20px;
+  min-height: 400px;
 }
 
-/* UPLOAD BOX — paling penting (fix layout) */
+/* UPLOAD SECTION */
 .upload-box {
   background: #f7fbff;
   border: 3px dashed #7db3ff;
   border-radius: 18px;
-  height: 280px;         /* FIX: tinggi tetap */
-  width: 100%;
-  overflow: hidden;      /* FIX: gambar tidak keluar box */
+  height: 240px;
   display: flex;
-  flex-direction: column;
   justify-content: center;
   align-items: center;
-  text-align: center;
+  padding: 12px;
   cursor: pointer;
-  padding: 10px;         /* memberi ruang pada preview */
+  transition: 0.2s;
+}
+
+.upload-box:hover {
+  background: #eff6ff;
 }
 
 .upload-title {
-  font-size: 20px;
-  color: #003e8a;
+  font-size: 19px;
   font-weight: 600;
-  margin: 0;
+  color: #004a98;
 }
 
 .upload-sub {
-  font-size: 14px;
-  color: #5a7bb5;
-  margin-top: 4px;
+  font-size: 13px;
+  color: #6e8bb7;
 }
 
-/* PREVIEW MEDIA (gambar & video) */
+/* PREVIEW */
 .preview-media {
-  max-width: 100%;
-  max-height: 100%;
-  object-fit: contain;    /* FIX TERPENTING */
-  border-radius: 12px;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  border-radius: 14px;
 }
 
 /* DROPDOWN */
 .dropdown {
   padding: 12px;
-  font-size: 16px;
+  font-size: 15px;
   border-radius: 12px;
   border: 2px solid #7db3ff;
+  color: #004a98;
+  font-weight: 500;
+  background-color: #ffffff;
+}
+
+.dropdown option {
+  color: #004a98;
 }
 
 /* BUTTON */
 .submit-btn {
   padding: 14px;
-  font-size: 17px;
+  font-size: 16px;
   font-weight: 600;
-  background: #6DB4FF;
   border: none;
   border-radius: 12px;
+  background: #6db4ff;
   color: white;
+  transition: 0.2s ease;
   cursor: pointer;
 }
-
 .submit-btn:hover {
   background: #4c9eff;
 }
 
 /* PANEL KANAN */
 .right-panel {
-  flex-grow: 1;
-  background: #f1f7ff;
+  width: 520px;             /* 🟦 Lebih compact */
+  min-height: 400px;
+  background: #f3f8ff;
   border-radius: 22px;
+  padding: 35px;
+
+  margin-left: 10px;        /* 🟦 Tambah jarak dari panel kiri */
+
   display: flex;
   justify-content: center;
   align-items: center;
-  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.08);
+
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.06);
 }
 
 .right-panel h2 {
-  font-size: 26px;
-  color: #003e8a;
+  font-size: 24px;
+  font-weight: 600;
+  color: #004a98;
+  margin: 0;
 }

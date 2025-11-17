@@ -6,41 +6,28 @@ function App() {
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [previewURL, setPreviewURL] = useState<string | null>(null);
 
-  const openFileDialog = () => {
-    fileInputRef.current?.click();
-  };
+  const openFileDialog = () => fileInputRef.current?.click();
 
   const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (file) {
       setSelectedFile(file);
-
-      // Buat URL preview
-      const url = URL.createObjectURL(file);
-      setPreviewURL(url);
+      setPreviewURL(URL.createObjectURL(file));
     }
   };
 
   return (
     <div className="layout">
+
       {/* LEFT PANEL */}
       <div className="left-panel">
 
-        {/* UPLOAD BOX */}
         <div className="upload-box" onClick={openFileDialog}>
           {previewURL ? (
             selectedFile?.type.startsWith("video/") ? (
-              <video
-                className="preview-media"
-                src={previewURL}
-                controls
-              />
+              <video className="preview-media" src={previewURL} controls />
             ) : (
-              <img
-                className="preview-media"
-                src={previewURL}
-                alt="preview"
-              />
+              <img className="preview-media" src={previewURL} alt="preview" />
             )
           ) : (
             <>
@@ -50,7 +37,6 @@ function App() {
           )}
         </div>
 
-        {/* HIDDEN INPUT */}
         <input
           type="file"
           ref={fileInputRef}
@@ -59,21 +45,21 @@ function App() {
           style={{ display: "none" }}
         />
 
-        {/* DROPDOWN */}
         <select className="dropdown">
           <option value="">Enhancement</option>
           <option value="tracking">Tracking</option>
           <option value="counter">Counter</option>
         </select>
 
-        {/* SUBMIT BUTTON */}
         <button className="submit-btn">Submit File</button>
+
       </div>
 
       {/* RIGHT PANEL */}
       <div className="right-panel">
         <h2>Output Modelnya</h2>
       </div>
+
     </div>
   );
 }
