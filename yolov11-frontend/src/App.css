@@ -1,42 +1,106 @@
-#root {
-  max-width: 1280px;
-  margin: 0 auto;
-  padding: 2rem;
+/* Background */
+body {
+  margin: 0;
+  padding: 0;
+  background: #eaf3ff;
+  font-family: "Segoe UI", Arial, sans-serif;
+}
+
+/* Layout utama */
+.layout {
+  display: flex;
+  gap: 40px;
+  padding: 40px;
+  height: 100vh;
+  box-sizing: border-box;
+}
+
+/* PANEL KIRI */
+.left-panel {
+  width: 360px;
+  background: #ffffff;
+  padding: 24px;
+  border-radius: 20px;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.08);
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+/* UPLOAD BOX — paling penting (fix layout) */
+.upload-box {
+  background: #f7fbff;
+  border: 3px dashed #7db3ff;
+  border-radius: 18px;
+  height: 280px;         /* FIX: tinggi tetap */
+  width: 100%;
+  overflow: hidden;      /* FIX: gambar tidak keluar box */
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
   text-align: center;
+  cursor: pointer;
+  padding: 10px;         /* memberi ruang pada preview */
 }
 
-.logo {
-  height: 6em;
-  padding: 1.5em;
-  will-change: filter;
-  transition: filter 300ms;
-}
-.logo:hover {
-  filter: drop-shadow(0 0 2em #646cffaa);
-}
-.logo.react:hover {
-  filter: drop-shadow(0 0 2em #61dafbaa);
+.upload-title {
+  font-size: 20px;
+  color: #003e8a;
+  font-weight: 600;
+  margin: 0;
 }
 
-@keyframes logo-spin {
-  from {
-    transform: rotate(0deg);
-  }
-  to {
-    transform: rotate(360deg);
-  }
+.upload-sub {
+  font-size: 14px;
+  color: #5a7bb5;
+  margin-top: 4px;
 }
 
-@media (prefers-reduced-motion: no-preference) {
-  a:nth-of-type(2) .logo {
-    animation: logo-spin infinite 20s linear;
-  }
+/* PREVIEW MEDIA (gambar & video) */
+.preview-media {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;    /* FIX TERPENTING */
+  border-radius: 12px;
 }
 
-.card {
-  padding: 2em;
+/* DROPDOWN */
+.dropdown {
+  padding: 12px;
+  font-size: 16px;
+  border-radius: 12px;
+  border: 2px solid #7db3ff;
 }
 
-.read-the-docs {
-  color: #888;
+/* BUTTON */
+.submit-btn {
+  padding: 14px;
+  font-size: 17px;
+  font-weight: 600;
+  background: #6DB4FF;
+  border: none;
+  border-radius: 12px;
+  color: white;
+  cursor: pointer;
+}
+
+.submit-btn:hover {
+  background: #4c9eff;
+}
+
+/* PANEL KANAN */
+.right-panel {
+  flex-grow: 1;
+  background: #f1f7ff;
+  border-radius: 22px;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.08);
+}
+
+.right-panel h2 {
+  font-size: 26px;
+  color: #003e8a;
 }
