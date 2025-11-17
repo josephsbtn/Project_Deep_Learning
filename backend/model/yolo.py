@@ -1,9 +1,10 @@
 # models/yolo.py
 from ultralytics import YOLO
+from pathlib import Path
 
-# Ubah PATH sesuai lokasi modelmu
-MODEL_PATH = r"D:\PROJECT\Project_Deep_Learning\backend\model\best.pt"
+# Use relative path to make it flexible
+MODEL_PATH = Path(__file__).parent / "best.pt"
 
 print(f"[yolo] memuat model dari {MODEL_PATH} ...")
-model = YOLO(MODEL_PATH)
+model = YOLO(str(MODEL_PATH))
 print("[yolo] model siap.")

@@ -2,6 +2,7 @@ import os
 import uuid
 import base64
 from flask import Flask, request, jsonify, send_file
+from flask_cors import CORS
 import cv2
 import numpy as np
 from pathlib import Path
@@ -11,6 +12,7 @@ from utils.tracking import run_tracking
 from utils.region import create_line_zone, create_polygon_zone, box_annotator, label_annotator
 
 app = Flask(__name__)
+CORS(app)  # Enable CORS for all routes
 OUTPUT_DIR = Path("static/output")
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -219,9 +221,28 @@ def process_video():
     h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
     fps = cap.get(cv2.CAP_PROP_FPS) or 25.0
 
-    fourcc = cv2.VideoWriter_fourcc(*"mp4v")
+    # Try H264 codec first, fallback to mp4v if not available
     out_path = OUTPUT_DIR / f"proc_{uuid.uuid4().hex}.mp4"
-    writer = cv2.VideoWriter(str(out_path), fourcc, fps, (w, h))
+
+    # Try different codecs for browser compatibility
+    codecs_to_try = ["avc1", "H264", "X264", "mp4v"]
+    writer = None
+
+    for codec in codecs_to_try:
+        try:
+            fourcc = cv2.VideoWriter_fourcc(*codec)
+            writer = cv2.VideoWriter(str(out_path), fourcc, fps, (w, h))
+            if writer.isOpened():
+                print(f"[video] Using codec: {codec}")
+                break
+        except:
+            continue
+
+    if writer is None or not writer.isOpened():
+        # Last resort: use default codec
+        fourcc = cv2.VideoWriter_fourcc(*"mp4v")
+        writer = cv2.VideoWriter(str(out_path), fourcc, fps, (w, h))
+        print(f"[video] Using fallback codec: mp4v")
 
     line_zone = None
     line_annot = None
@@ -273,32 +294,29 @@ def process_video():
 
     cap.release()
     writer.release()
-    
-    # Convert video to base64
-    video_base64 = video_to_base64(out_path)
-    
-    # Cleanup temp files
+
+    # Cleanup temp input file
     try:
         tmp_in_path.unlink()
-        out_path.unlink()  # Delete after converting to base64
     except:
         pass
 
+    # Return filename instead of base64 for better performance
     result = {
-        "video": video_base64,
+        "video_url": f"/video/{out_path.name}",
         "frames_processed": frame_idx
     }
-    
+
     if line_zone:
         result.update({
-            "count_in": int(line_zone.in_count), 
+            "count_in": int(line_zone.in_count),
             "count_out": int(line_zone.out_count)
         })
     if poly_zone:
         result.update({
             "count": int(poly_zone.current_count)
         })
-    
+
     return jsonify(result)
 
 # --- Optional: Keep these for backward compatibility or file management ---
@@ -310,14 +328,34 @@ def list_outputs():
 @app.route("/download", methods=["GET"])
 def download_file():
     filename = request.args.get("filename")
-    if not filename: 
+    if not filename:
         return jsonify({"error": "filename param required"}), 400
-    
+
     file_path = OUTPUT_DIR / filename
-    if not file_path.exists() or not file_path.is_file(): 
+    if not file_path.exists() or not file_path.is_file():
         return jsonify({"error": "file not found"}), 404
-    
+
     return send_file(str(file_path), as_attachment=True)
+
+@app.route("/video/<filename>", methods=["GET"])
+def serve_video(filename):
+    """Serve video files with proper headers for browser playback"""
+    file_path = OUTPUT_DIR / filename
+    print(f"[video] Request for: {filename}")
+    print(f"[video] File path: {file_path}")
+    print(f"[video] File exists: {file_path.exists()}")
+
+    if not file_path.exists() or not file_path.is_file():
+        print(f"[video] ERROR: File not found!")
+        return jsonify({"error": "file not found"}), 404
+
+    print(f"[video] Serving video file")
+    return send_file(
+        str(file_path),
+        mimetype='video/mp4',
+        as_attachment=False,
+        download_name=filename
+    )
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000, debug=True)
