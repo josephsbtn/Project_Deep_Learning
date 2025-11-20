@@ -1,6 +1,6 @@
 // Types for State Management
 
-export type ProcessMode = "enhancement" | "detect" | "tracking" | "counter-line" | "counter-polygon" | "";
+export type ProcessMode = "enhancement" | "detect" | "tracking" | "counter" | "";
 
 export type EnhancementKind = "CLAHE" | "Histogram" | "Gamma" | "Bilateral";
 

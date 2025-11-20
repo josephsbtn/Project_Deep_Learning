@@ -135,13 +135,12 @@ export const track = async (
 };
 
 /**
- * Count objects crossing line or inside polygon
+ * Count objects inside polygon area
  */
 export const count = async (
   file: File,
-  options: {
-    region_type: "line" | "polygon";
-    polygon_id?: string;
+  polygonId: string,
+  options?: {
     enhance?: boolean;
     enhancement_kind?: string;
     brightness?: number;
@@ -151,20 +150,16 @@ export const count = async (
 ): Promise<CountResponse> => {
   const formData = new FormData();
   formData.append("file", file);
-  formData.append("region_type", options.region_type);
+  formData.append("polygon_id", polygonId);
 
-  if (options.polygon_id) {
-    formData.append("polygon_id", options.polygon_id);
-  }
-
-  if (options.enhance) {
+  if (options?.enhance) {
     formData.append("enhance", "true");
     formData.append("enhancement_kind", options.enhancement_kind || "CLAHE");
     formData.append("brightness", String(options.brightness || 0));
     formData.append("contrast", String(options.contrast || 0));
   }
 
-  if (options.tracker) {
+  if (options?.tracker) {
     formData.append("tracker", options.tracker);
   }
 

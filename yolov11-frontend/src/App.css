@@ -252,3 +252,56 @@ body {
   cursor: not-allowed;
   opacity: 0.6;
 }
+
+/* POLYGON INPUT */
+.polygon-input {
+  width: 100%;
+  padding: 10px;
+  border: 2px solid #d0e4ff;
+  border-radius: 8px;
+  font-family: monospace;
+  font-size: 14px;
+  resize: vertical;
+  background: #ffffff;
+  box-sizing: border-box;
+  white-space: pre;
+  line-height: 1.5;
+}
+
+.polygon-input:focus {
+  outline: none;
+  border-color: #6db4ff;
+}
+
+.create-polygon-btn {
+  width: 100%;
+  padding: 10px 20px;
+  background: #28a745;
+  color: white;
+  border: none;
+  border-radius: 10px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+
+.create-polygon-btn:hover {
+  background: #218838;
+}
+
+.create-polygon-btn:disabled {
+  background: #94d3a2;
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.polygon-status {
+  margin: 0;
+  padding: 8px 12px;
+  background: #d4edda;
+  border-radius: 8px;
+  font-size: 12px;
+  color: #155724;
+  word-break: break-all;
+}

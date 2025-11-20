@@ -331,7 +331,7 @@ def count():
     """
     if "file" not in request.files:
         return jsonify({"error": "file not found"}), 400
-    
+
     file = request.files["file"]
     polygon_id = request.form.get("polygon_id", None)
     enhance = request.form.get("enhance", "false").lower() == "true"
@@ -339,36 +339,36 @@ def count():
     brightness = int(request.form.get("brightness", 0))
     contrast = int(request.form.get("contrast", 0))
     tracker_cfg = request.form.get("tracker", "bytetrack.yaml")
-    
+
     # Validate polygon_id
     if not polygon_id or polygon_id not in POLYGON_ZONES:
-        return jsonify({"error": "polygon_id invalid or not provided"}), 400
-    
+        return jsonify({"error": "polygon_id invalid or not provided. Create polygon first via /polygon/create"}), 400
+
     poly_zone, poly_annot = POLYGON_ZONES[polygon_id]
-    
+
     # Check if video or image
     if is_video_file(file):
         # Process video
         tmp_in_path = OUTPUT_DIR / f"tmp_in_{uuid.uuid4().hex}.mp4"
         file.save(str(tmp_in_path))
-        
+
         out_path = OUTPUT_DIR / f"count_{uuid.uuid4().hex}.mp4"
-        
+
         def process_func(frame, frame_idx):
             # Apply enhancement
             proc = frame.copy()
             if enhance:
                 proc = apply_enhancement(proc, enhancement_kind, brightness, contrast)
-            
+
             # Track objects
             detections = run_tracking(model, proc, tracker_cfg=tracker_cfg)
-            
-            # Trigger counting in polygon
+
+            # Trigger counting with polygon
             poly_zone.trigger(detections=detections)
-            
+
             # Annotate
             annotated = box_annotator.annotate(scene=proc, detections=detections)
-            
+
             # Labels
             labels = []
             tracker_ids = detections.tracker_id if detections.tracker_id is not None else [None] * len(detections)
@@ -377,60 +377,58 @@ def count():
                     labels.append(f"#{tid} {model.names[cid]} {conf:0.2f}")
                 else:
                     labels.append(f"{model.names[cid]} {conf:0.2f}")
-            
+
             annotated = label_annotator.annotate(scene=annotated, detections=detections, labels=labels)
-            
+
             # Annotate polygon zone
             poly_annot.annotate(frame=annotated, zone=poly_zone)
-            
+
             # Return count
             return annotated, {
                 "count": int(poly_zone.current_count)
             }
-        
+
         results, err = process_video(tmp_in_path, out_path, process_func)
-        
+
         # Cleanup
         try:
             tmp_in_path.unlink()
         except:
             pass
-        
+
         if err:
             return jsonify({"error": err}), 500
-        
-        response = {
+
+        return jsonify({
             "type": "video",
             "video_url": f"/video/{out_path.name}",
             "frames_processed": results.get("frames_processed", 0),
             "enhancement_applied": enhance,
-            "polygon_id": polygon_id,
             "tracker": tracker_cfg,
+            "polygon_id": polygon_id,
             "count": results.get("count", 0)
-        }
-        
-        return jsonify(response)
-    
+        })
+
     else:
         # Process image
         img, err = read_image_from_request("file")
         if err:
             return jsonify({"error": err}), 400
-        
+
         # Apply enhancement
         proc = img.copy()
         if enhance:
             proc = apply_enhancement(proc, enhancement_kind, brightness, contrast)
-        
+
         # Track objects
         detections = run_tracking(model, proc, tracker_cfg=tracker_cfg)
-        
-        # Trigger counting in polygon
+
+        # Trigger counting with polygon
         poly_zone.trigger(detections=detections)
-        
+
         # Annotate
         annotated = box_annotator.annotate(scene=proc, detections=detections)
-        
+
         # Labels
         labels = []
         tracker_ids = detections.tracker_id if detections.tracker_id is not None else [None] * len(detections)
@@ -439,18 +437,18 @@ def count():
                 labels.append(f"#{tid} {model.names[cid]} {conf:0.2f}")
             else:
                 labels.append(f"{model.names[cid]} {conf:0.2f}")
-        
+
         annotated = label_annotator.annotate(scene=annotated, detections=detections, labels=labels)
-        
+
         # Annotate polygon zone
         poly_annot.annotate(frame=annotated, zone=poly_zone)
-        
+
         return jsonify({
             "type": "image",
             "image": image_to_base64(annotated),
             "enhancement_applied": enhance,
-            "polygon_id": polygon_id,
             "tracker": tracker_cfg,
+            "polygon_id": polygon_id,
             "count": int(poly_zone.current_count)
         })
 
