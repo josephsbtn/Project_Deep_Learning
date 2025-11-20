@@ -54,7 +54,7 @@ function App() {
       if (isVideo) {
         // Process video
         const options: any = {
-          track: processMode === "tracking" || processMode.startsWith("counter"),
+          track: processMode === "tracking" || processMode === "detect" || processMode.startsWith("counter"),
           count_mode: "none",
         };
 
