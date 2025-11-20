@@ -436,8 +436,8 @@ def count():
             annotated = label_annotator.annotate(scene=annotated, detections=detections, labels=labels)
             
             # Annotate polygon zone
-            poly_annot.annotate(frame=annotated, zone=poly_zone)
-            
+            annotated = poly_annot.annotate(scene=annotated)
+
             # Return count
             return annotated, {
                 "count": int(poly_zone.current_count)
@@ -503,7 +503,7 @@ def count():
         annotated = label_annotator.annotate(scene=annotated, detections=detections, labels=labels)
         
         # Annotate polygon zone
-        poly_annot.annotate(frame=annotated, zone=poly_zone)
+        annotated = poly_annot.annotate(scene=annotated)
         
         response = {
             "type": "image",

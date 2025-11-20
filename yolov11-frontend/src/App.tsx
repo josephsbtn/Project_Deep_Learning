@@ -1,6 +1,6 @@
 import { useRef, useState } from "react";
 import "./App.css";
-import { detect, track, count, createPolygon } from "./services/api";
+import { detect, track, count } from "./services/api";
 import type { ProcessMode, EnhancementKind, ProcessingResult } from "./types";
 
 function App() {
@@ -15,11 +15,6 @@ function App() {
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<ProcessingResult | null>(null);
 
-  // Polygon state for counter mode
-  const [polygonPoints, setPolygonPoints] = useState<string>("100,100\n200,100\n200,200\n100,200");
-  const [polygonId, setPolygonId] = useState<string | null>(null);
-  const [polygonCreating, setPolygonCreating] = useState<boolean>(false);
-
   const openFileDialog = () => fileInputRef.current?.click();
 
   const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -29,33 +24,6 @@ function App() {
       setPreviewURL(URL.createObjectURL(file));
       setResult(null);
       setError(null);
-    }
-  };
-
-  const handleCreatePolygon = async () => {
-    try {
-      setPolygonCreating(true);
-      setError(null);
-
-      // Parse polygon points from textarea
-      const lines = polygonPoints.trim().split("\n");
-      const points = lines.map(line => {
-        const [x, y] = line.split(",").map(n => parseInt(n.trim()));
-        return [x, y];
-      });
-
-      if (points.length < 3) {
-        setError("Polygon needs at least 3 points");
-        return;
-      }
-
-      const response = await createPolygon(points);
-      setPolygonId(response.polygon_id);
-      setError(null);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to create polygon");
-    } finally {
-      setPolygonCreating(false);
     }
   };
 
@@ -95,24 +63,19 @@ function App() {
           break;
         }
 
-        case "tracking": {
-          const response = await track(selectedFile, enhanceOptions);
-          setResult({
-            image: response.image,
-            video_url: response.video_url,
-            num_detections: response.num_detections,
-            frames_processed: response.frames_processed,
-          });
-          break;
-        }
+        // case "tracking": {
+        //   const response = await track(selectedFile, enhanceOptions);
+        //   setResult({
+        //     image: response.image,
+        //     video_url: response.video_url,
+        //     num_detections: response.num_detections,
+        //     frames_processed: response.frames_processed,
+        //   });
+        //   break;
+        // }
 
         case "counter": {
-          if (!polygonId) {
-            setError("Please create a polygon first");
-            setLoading(false);
-            return;
-          }
-          const response = await count(selectedFile, polygonId, enhanceOptions);
+          const response = await count(selectedFile, undefined, enhanceOptions);
           setResult({
             image: response.image,
             video_url: response.video_url,
@@ -167,7 +130,7 @@ function App() {
           <option value="">Select Mode</option>
           <option value="enhancement">Enhancement</option>
           <option value="detect">Detect</option>
-          <option value="tracking">Tracking</option>
+          {/* <option value="tracking">Tracking</option> */}
           <option value="counter">Object Counter</option>
         </select>
 
@@ -208,30 +171,6 @@ function App() {
           </div>
         )}
 
-        {processMode === "counter" && (
-          <div className="options-panel">
-            <label>
-              Polygon Coordinates (x,y per line):
-              <textarea
-                className="polygon-input"
-                value={polygonPoints}
-                onChange={(e) => setPolygonPoints(e.target.value)}
-                rows={5}
-                placeholder={"100,100\n200,100\n200,200\n100,200"}
-              />
-            </label>
-            <button
-              className="create-polygon-btn"
-              onClick={handleCreatePolygon}
-              disabled={polygonCreating}
-            >
-              {polygonCreating ? "Creating..." : "Create Polygon"}
-            </button>
-            {polygonId && (
-              <p className="polygon-status">Polygon ID: {polygonId}</p>
-            )}
-          </div>
-        )}
 
         <button className="submit-btn" onClick={handleSubmit} disabled={loading}>
           {loading ? "Processing..." : "Submit File"}

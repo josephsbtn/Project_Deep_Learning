@@ -40,13 +40,13 @@ export interface CountResponse {
   type: "image" | "video";
   image?: string;
   video_url?: string;
-  count_in?: number;
-  count_out?: number;
   count?: number;
   frames_processed?: number;
   enhancement_applied?: boolean;
-  region_type?: string;
+  polygon_id?: string;
   tracker?: string;
+  auto_generated_polygon?: boolean;
+  polygon_points?: number[][];
 }
 
 // Polygon Response
@@ -139,7 +139,7 @@ export const track = async (
  */
 export const count = async (
   file: File,
-  polygonId: string,
+  polygonId?: string,
   options?: {
     enhance?: boolean;
     enhancement_kind?: string;
@@ -150,7 +150,10 @@ export const count = async (
 ): Promise<CountResponse> => {
   const formData = new FormData();
   formData.append("file", file);
-  formData.append("polygon_id", polygonId);
+
+  if (polygonId) {
+    formData.append("polygon_id", polygonId);
+  }
 
   if (options?.enhance) {
     formData.append("enhance", "true");

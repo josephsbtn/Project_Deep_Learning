@@ -33,6 +33,7 @@ def create_polygon_zone(points):
     
     poly = sv.PolygonZone(polygon=points)
     annotator = sv.PolygonZoneAnnotator(
+        zone=poly,
         thickness=2,
         text_thickness=2,
         text_scale=1
