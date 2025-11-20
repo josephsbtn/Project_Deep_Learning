@@ -47,6 +47,25 @@ def is_video_file(file):
     filename = file.filename.lower()
     return any(filename.endswith(ext) for ext in video_extensions)
 
+def create_default_polygon(image_shape):
+    """Create a default polygon covering the center 80% of the image"""
+    h, w = image_shape[:2]
+    margin_x = int(w * 0.1)
+    margin_y = int(h * 0.1)
+    
+    points = [
+        [margin_x, margin_y],
+        [w - margin_x, margin_y],
+        [w - margin_x, h - margin_y],
+        [margin_x, h - margin_y]
+    ]
+    
+    points_array = np.array(points, dtype=np.int32)
+    poly, annot = create_polygon_zone(points_array)
+    pid = uuid.uuid4().hex
+    POLYGON_ZONES[pid] = (poly, annot)
+    return pid, points
+
 def process_frame_detect(frame, enhance=False, enhancement_kind="CLAHE", brightness=0, contrast=0):
     """Process single frame with detection only"""
     proc = frame.copy()
@@ -322,16 +341,16 @@ def count():
     Count objects inside polygon area
     Form params:
     - file: image or video file
-    - polygon_id: required - polygon area ID from /polygon/create
     - enhance: true/false (optional, default: false)
     - enhancement_kind: CLAHE/histogram/gamma (optional, default: CLAHE)
     - brightness: int (optional, default: 0)
     - contrast: int (optional, default: 0)
     - tracker: bytetrack.yaml/botsort.yaml (optional, default: bytetrack.yaml)
+    - polygon_id: optional - if provided, use existing polygon; if not, auto-generate
     """
     if "file" not in request.files:
         return jsonify({"error": "file not found"}), 400
-
+    
     file = request.files["file"]
     polygon_id = request.form.get("polygon_id", None)
     enhance = request.form.get("enhance", "false").lower() == "true"
@@ -339,36 +358,72 @@ def count():
     brightness = int(request.form.get("brightness", 0))
     contrast = int(request.form.get("contrast", 0))
     tracker_cfg = request.form.get("tracker", "bytetrack.yaml")
-
-    # Validate polygon_id
-    if not polygon_id or polygon_id not in POLYGON_ZONES:
-        return jsonify({"error": "polygon_id invalid or not provided. Create polygon first via /polygon/create"}), 400
-
-    poly_zone, poly_annot = POLYGON_ZONES[polygon_id]
-
+    
+    # Get polygon zone - either use existing or create a new one
+    polygon_points = None
+    auto_generated = False
+    
+    if polygon_id and polygon_id in POLYGON_ZONES:
+        # Use existing polygon
+        poly_zone, poly_annot = POLYGON_ZONES[polygon_id]
+    else:
+        # Need to create a new polygon, but we need image dimensions first
+        # Read the first frame to get dimensions
+        if is_video_file(file):
+            # Save temporarily to get dimensions
+            tmp_in_path = OUTPUT_DIR / f"tmp_in_{uuid.uuid4().hex}.mp4"
+            file.save(str(tmp_in_path))
+            
+            cap = cv2.VideoCapture(str(tmp_in_path))
+            ret, frame = cap.read()
+            cap.release()
+            
+            if not ret:
+                try:
+                    tmp_in_path.unlink()
+                except:
+                    pass
+                return jsonify({"error": "Failed to read video"}), 400
+            
+            # Create default polygon based on video dimensions
+            polygon_id, polygon_points = create_default_polygon(frame.shape)
+            poly_zone, poly_annot = POLYGON_ZONES[polygon_id]
+            auto_generated = True
+        else:
+            # Read image to get dimensions
+            img, err = read_image_from_request("file")
+            if err:
+                return jsonify({"error": err}), 400
+            
+            # Create default polygon based on image dimensions
+            polygon_id, polygon_points = create_default_polygon(img.shape)
+            poly_zone, poly_annot = POLYGON_ZONES[polygon_id]
+            auto_generated = True
+    
     # Check if video or image
     if is_video_file(file):
         # Process video
-        tmp_in_path = OUTPUT_DIR / f"tmp_in_{uuid.uuid4().hex}.mp4"
-        file.save(str(tmp_in_path))
-
+        if not auto_generated:  # If we didn't already save the video
+            tmp_in_path = OUTPUT_DIR / f"tmp_in_{uuid.uuid4().hex}.mp4"
+            file.save(str(tmp_in_path))
+        
         out_path = OUTPUT_DIR / f"count_{uuid.uuid4().hex}.mp4"
-
+        
         def process_func(frame, frame_idx):
             # Apply enhancement
             proc = frame.copy()
             if enhance:
                 proc = apply_enhancement(proc, enhancement_kind, brightness, contrast)
-
+            
             # Track objects
             detections = run_tracking(model, proc, tracker_cfg=tracker_cfg)
-
-            # Trigger counting with polygon
+            
+            # Trigger counting in polygon
             poly_zone.trigger(detections=detections)
-
+            
             # Annotate
             annotated = box_annotator.annotate(scene=proc, detections=detections)
-
+            
             # Labels
             labels = []
             tracker_ids = detections.tracker_id if detections.tracker_id is not None else [None] * len(detections)
@@ -377,58 +432,65 @@ def count():
                     labels.append(f"#{tid} {model.names[cid]} {conf:0.2f}")
                 else:
                     labels.append(f"{model.names[cid]} {conf:0.2f}")
-
+            
             annotated = label_annotator.annotate(scene=annotated, detections=detections, labels=labels)
-
+            
             # Annotate polygon zone
             poly_annot.annotate(frame=annotated, zone=poly_zone)
-
+            
             # Return count
             return annotated, {
                 "count": int(poly_zone.current_count)
             }
-
+        
         results, err = process_video(tmp_in_path, out_path, process_func)
-
+        
         # Cleanup
         try:
             tmp_in_path.unlink()
         except:
             pass
-
+        
         if err:
             return jsonify({"error": err}), 500
-
-        return jsonify({
+        
+        response = {
             "type": "video",
             "video_url": f"/video/{out_path.name}",
             "frames_processed": results.get("frames_processed", 0),
             "enhancement_applied": enhance,
-            "tracker": tracker_cfg,
             "polygon_id": polygon_id,
-            "count": results.get("count", 0)
-        })
-
+            "tracker": tracker_cfg,
+            "count": results.get("count", 0),
+            "auto_generated_polygon": auto_generated
+        }
+        
+        if auto_generated and polygon_points:
+            response["polygon_points"] = polygon_points
+        
+        return jsonify(response)
+    
     else:
         # Process image
-        img, err = read_image_from_request("file")
-        if err:
-            return jsonify({"error": err}), 400
-
+        if not auto_generated:  # If we didn't already read the image
+            img, err = read_image_from_request("file")
+            if err:
+                return jsonify({"error": err}), 400
+        
         # Apply enhancement
         proc = img.copy()
         if enhance:
             proc = apply_enhancement(proc, enhancement_kind, brightness, contrast)
-
+        
         # Track objects
         detections = run_tracking(model, proc, tracker_cfg=tracker_cfg)
-
-        # Trigger counting with polygon
+        
+        # Trigger counting in polygon
         poly_zone.trigger(detections=detections)
-
+        
         # Annotate
         annotated = box_annotator.annotate(scene=proc, detections=detections)
-
+        
         # Labels
         labels = []
         tracker_ids = detections.tracker_id if detections.tracker_id is not None else [None] * len(detections)
@@ -437,20 +499,26 @@ def count():
                 labels.append(f"#{tid} {model.names[cid]} {conf:0.2f}")
             else:
                 labels.append(f"{model.names[cid]} {conf:0.2f}")
-
+        
         annotated = label_annotator.annotate(scene=annotated, detections=detections, labels=labels)
-
+        
         # Annotate polygon zone
         poly_annot.annotate(frame=annotated, zone=poly_zone)
-
-        return jsonify({
+        
+        response = {
             "type": "image",
             "image": image_to_base64(annotated),
             "enhancement_applied": enhance,
-            "tracker": tracker_cfg,
             "polygon_id": polygon_id,
-            "count": int(poly_zone.current_count)
-        })
+            "tracker": tracker_cfg,
+            "count": int(poly_zone.current_count),
+            "auto_generated_polygon": auto_generated
+        }
+        
+        if auto_generated and polygon_points:
+            response["polygon_points"] = polygon_points
+        
+        return jsonify(response)
 
 # ============================================================================
 # POLYGON MANAGEMENT
