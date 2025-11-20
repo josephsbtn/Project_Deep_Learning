@@ -319,11 +319,10 @@ def track():
 @app.route("/count", methods=["POST"])
 def count():
     """
-    Count objects crossing a line or inside polygon
+    Count objects inside polygon area
     Form params:
     - file: image or video file
-    - region_type: line/polygon (required)
-    - polygon_id: required if region_type=polygon
+    - polygon_id: required - polygon area ID from /polygon/create
     - enhance: true/false (optional, default: false)
     - enhancement_kind: CLAHE/histogram/gamma (optional, default: CLAHE)
     - brightness: int (optional, default: 0)
@@ -334,7 +333,6 @@ def count():
         return jsonify({"error": "file not found"}), 400
     
     file = request.files["file"]
-    region_type = request.form.get("region_type", "line")
     polygon_id = request.form.get("polygon_id", None)
     enhance = request.form.get("enhance", "false").lower() == "true"
     enhancement_kind = request.form.get("enhancement_kind", "CLAHE")
@@ -342,17 +340,11 @@ def count():
     contrast = int(request.form.get("contrast", 0))
     tracker_cfg = request.form.get("tracker", "bytetrack.yaml")
     
-    # Validate region type
-    if region_type not in ["line", "polygon"]:
-        return jsonify({"error": "region_type must be 'line' or 'polygon'"}), 400
+    # Validate polygon_id
+    if not polygon_id or polygon_id not in POLYGON_ZONES:
+        return jsonify({"error": "polygon_id invalid or not provided"}), 400
     
-    # Setup counting zone
-    if region_type == "line":
-        counter_zone, zone_annotator = create_line_zone()
-    else:  # polygon
-        if not polygon_id or polygon_id not in POLYGON_ZONES:
-            return jsonify({"error": "polygon_id invalid or not provided"}), 400
-        counter_zone, zone_annotator = POLYGON_ZONES[polygon_id]
+    poly_zone, poly_annot = POLYGON_ZONES[polygon_id]
     
     # Check if video or image
     if is_video_file(file):
@@ -371,8 +363,8 @@ def count():
             # Track objects
             detections = run_tracking(model, proc, tracker_cfg=tracker_cfg)
             
-            # Trigger counting
-            counter_zone.trigger(detections=detections)
+            # Trigger counting in polygon
+            poly_zone.trigger(detections=detections)
             
             # Annotate
             annotated = box_annotator.annotate(scene=proc, detections=detections)
@@ -388,22 +380,13 @@ def count():
             
             annotated = label_annotator.annotate(scene=annotated, detections=detections, labels=labels)
             
-            # Annotate counting zone
-            if region_type == "line":
-                zone_annotator.annotate(frame=annotated, line_counter=counter_zone)
-            else:
-                zone_annotator.annotate(frame=annotated, zone=counter_zone)
+            # Annotate polygon zone
+            poly_annot.annotate(frame=annotated, zone=poly_zone)
             
-            # Return results
-            if region_type == "line":
-                return annotated, {
-                    "count_in": int(counter_zone.in_count),
-                    "count_out": int(counter_zone.out_count)
-                }
-            else:
-                return annotated, {
-                    "count": int(counter_zone.current_count)
-                }
+            # Return count
+            return annotated, {
+                "count": int(poly_zone.current_count)
+            }
         
         results, err = process_video(tmp_in_path, out_path, process_func)
         
@@ -421,19 +404,10 @@ def count():
             "video_url": f"/video/{out_path.name}",
             "frames_processed": results.get("frames_processed", 0),
             "enhancement_applied": enhance,
-            "region_type": region_type,
-            "tracker": tracker_cfg
+            "polygon_id": polygon_id,
+            "tracker": tracker_cfg,
+            "count": results.get("count", 0)
         }
-        
-        if region_type == "line":
-            response.update({
-                "count_in": results.get("count_in", 0),
-                "count_out": results.get("count_out", 0)
-            })
-        else:
-            response.update({
-                "count": results.get("count", 0)
-            })
         
         return jsonify(response)
     
@@ -451,8 +425,8 @@ def count():
         # Track objects
         detections = run_tracking(model, proc, tracker_cfg=tracker_cfg)
         
-        # Trigger counting
-        counter_zone.trigger(detections=detections)
+        # Trigger counting in polygon
+        poly_zone.trigger(detections=detections)
         
         # Annotate
         annotated = box_annotator.annotate(scene=proc, detections=detections)
@@ -468,31 +442,17 @@ def count():
         
         annotated = label_annotator.annotate(scene=annotated, detections=detections, labels=labels)
         
-        # Annotate counting zone
-        if region_type == "line":
-            zone_annotator.annotate(frame=annotated, line_counter=counter_zone)
-        else:
-            zone_annotator.annotate(frame=annotated, zone=counter_zone)
+        # Annotate polygon zone
+        poly_annot.annotate(frame=annotated, zone=poly_zone)
         
-        response = {
+        return jsonify({
             "type": "image",
             "image": image_to_base64(annotated),
             "enhancement_applied": enhance,
-            "region_type": region_type,
-            "tracker": tracker_cfg
-        }
-        
-        if region_type == "line":
-            response.update({
-                "count_in": int(counter_zone.in_count),
-                "count_out": int(counter_zone.out_count)
-            })
-        else:
-            response.update({
-                "count": int(counter_zone.current_count)
-            })
-        
-        return jsonify(response)
+            "polygon_id": polygon_id,
+            "tracker": tracker_cfg,
+            "count": int(poly_zone.current_count)
+        })
 
 # ============================================================================
 # POLYGON MANAGEMENT
