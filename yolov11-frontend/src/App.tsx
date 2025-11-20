@@ -1,12 +1,6 @@
 import { useRef, useState } from "react";
 import "./App.css";
-import {
-  enhanceImage,
-  detectImage,
-  trackImage,
-  countLine,
-  processVideo,
-} from "./services/api";
+import { detect, track, count } from "./services/api";
 import type { ProcessMode, EnhancementKind, ProcessingResult } from "./types";
 
 function App() {
@@ -49,70 +43,54 @@ function App() {
     setResult(null);
 
     try {
-      const isVideo = selectedFile.type.startsWith("video/");
+      const enhanceOptions = processMode === "enhancement" ? {
+        enhance: true,
+        enhancement_kind: enhancementKind,
+        brightness: brightness,
+        contrast: contrast,
+      } : undefined;
 
-      if (isVideo) {
-        // Process video
-        const options: any = {
-          track: processMode === "tracking" || processMode === "detect" || processMode.startsWith("counter"),
-          count_mode: "none",
-        };
-
-        if (processMode === "enhancement") {
-          options.enhance = true;
-          options.enhancement_kind = enhancementKind;
+      switch (processMode) {
+        case "enhancement":
+        case "detect": {
+          const response = await detect(selectedFile, enhanceOptions);
+          setResult({
+            image: response.image,
+            video_url: response.video_url,
+            detections: response.detections,
+            frames_processed: response.frames_processed,
+          });
+          break;
         }
 
-        if (processMode === "counter-line") {
-          options.count_mode = "line";
+        case "tracking": {
+          const response = await track(selectedFile, enhanceOptions);
+          setResult({
+            image: response.image,
+            video_url: response.video_url,
+            num_detections: response.num_detections,
+            frames_processed: response.frames_processed,
+          });
+          break;
         }
 
-        const response = await processVideo(selectedFile, options);
-        setResult({
-          video: response.video,
-          video_url: response.video_url,
-          frames_processed: response.frames_processed,
-          count_in: response.count_in,
-          count_out: response.count_out,
-        });
-      } else {
-        // Process image
-        let response;
-
-        switch (processMode) {
-          case "enhancement":
-            response = await enhanceImage(selectedFile, enhancementKind, brightness, contrast);
-            setResult({ image: response.image });
-            break;
-
-          case "detect":
-            response = await detectImage(selectedFile);
-            setResult({
-              image: response.image,
-              detections: response.detections,
-            });
-            break;
-
-          case "tracking":
-            response = await trackImage(selectedFile);
-            setResult({
-              image: response.image,
-              num_detections: response.num_detections,
-            });
-            break;
-
-          case "counter-line":
-            response = await countLine(selectedFile);
-            setResult({
-              image: response.image,
-              count_in: response.count_in,
-              count_out: response.count_out,
-            });
-            break;
-
-          default:
-            throw new Error("Invalid processing mode");
+        case "counter-line": {
+          const response = await count(selectedFile, {
+            region_type: "line",
+            ...enhanceOptions,
+          });
+          setResult({
+            image: response.image,
+            video_url: response.video_url,
+            count_in: response.count_in,
+            count_out: response.count_out,
+            frames_processed: response.frames_processed,
+          });
+          break;
         }
+
+        default:
+          throw new Error("Invalid processing mode");
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : "An error occurred");
@@ -156,8 +134,7 @@ function App() {
           <option value="">Select Mode</option>
           <option value="enhancement">Enhancement</option>
           <option value="detect">Detect</option>
-          <option value="tracking">Tracking</option>
-          <option value="counter-line">Counter (Line)</option>
+          <option value="counter-line">Object Counter</option>
         </select>
 
         {processMode === "enhancement" && (
@@ -216,9 +193,9 @@ function App() {
               <img src={result.image} alt="Result" className="result-media" />
             )}
 
-            {(result.video || result.video_url) && (
+            {result.video_url && (
               <video
-                src={result.video_url ? `http://localhost:5000${result.video_url}` : result.video}
+                src={`http://localhost:5000${result.video_url}`}
                 controls
                 className="result-media"
               />
