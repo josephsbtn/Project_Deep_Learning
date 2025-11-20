@@ -12,11 +12,19 @@ from utils.tracking import run_tracking
 from utils.region import create_line_zone, create_polygon_zone, box_annotator, label_annotator
 
 app = Flask(__name__)
-CORS(app)  # Enable CORS for all routes
+CORS(app)
 OUTPUT_DIR = Path("static/output")
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
+# Store polygon zones
+POLYGON_ZONES = {}
+
+# ============================================================================
+# HELPER FUNCTIONS
+# ============================================================================
+
 def read_image_from_request(field_name="file"):
+    """Read image from request"""
     if field_name not in request.files:
         return None, "file not found"
     f = request.files[field_name]
@@ -33,329 +41,555 @@ def image_to_base64(image):
     img_base64 = base64.b64encode(buffer).decode('utf-8')
     return f"data:image/jpeg;base64,{img_base64}"
 
-def video_to_base64(video_path):
-    """Convert video file to base64 string"""
-    with open(video_path, 'rb') as video_file:
-        video_data = video_file.read()
-        video_base64 = base64.b64encode(video_data).decode('utf-8')
-        return f"data:video/mp4;base64,{video_base64}"
+def is_video_file(file):
+    """Check if uploaded file is a video"""
+    video_extensions = ['.mp4', '.avi', '.mov', '.mkv', '.flv', '.wmv']
+    filename = file.filename.lower()
+    return any(filename.endswith(ext) for ext in video_extensions)
 
-# --- Endpoint Enhancement (multi-kind) ---
-@app.route("/enhance-image", methods=["POST"])
-def enhance_image():
-    img, err = read_image_from_request("file")
+def process_frame_detect(frame, enhance=False, enhancement_kind="CLAHE", brightness=0, contrast=0):
+    """Process single frame with detection only"""
+    proc = frame.copy()
     
-    if err: 
-        return jsonify({"error": err}), 400
-
-    kind = request.form.get("kind", "CLAHE")
-    brightness = int(request.form.get("brightness", 0))
-    contrast = int(request.form.get("contrast", 0))
-    enhanced = apply_enhancement(img, kind, brightness=brightness, contrast=contrast)
-
-    # Return base64
-    return jsonify({
-        "image": image_to_base64(enhanced),
-        "kind": kind
-    })
-
-# --- Endpoint Detect Only ---
-@app.route("/detect", methods=["POST"])
-def detect_only():
-    img, err = read_image_from_request("file")
-    if err: 
-        return jsonify({"error": err}), 400
-
-    results = model(img)[0]
+    # Apply enhancement if requested
+    if enhance:
+        proc = apply_enhancement(proc, enhancement_kind, brightness=brightness, contrast=contrast)
+    
+    # Run detection
+    results = model(proc)[0]
     annotated = results.plot()
     
+    # Extract detections
     detections_list = []
     if results.boxes is not None and len(results.boxes) > 0:
-        for box, cls, conf in zip(results.boxes.xyxy.tolist(), results.boxes.cls.tolist(), results.boxes.conf.tolist()):
+        for box, cls, conf in zip(results.boxes.xyxy.tolist(), 
+                                   results.boxes.cls.tolist(), 
+                                   results.boxes.conf.tolist()):
             detections_list.append({
-                "box": box, 
-                "class_id": int(cls), 
-                "confidence": float(conf), 
+                "box": box,
+                "class_id": int(cls),
+                "confidence": float(conf),
                 "label": model.names[int(cls)]
             })
     
-    return jsonify({
-        "image": image_to_base64(annotated),
-        "detections": detections_list
-    })
+    return annotated, detections_list
 
-# --- Endpoint Tracking Only ---
+def process_frame_track(frame, enhance=False, enhancement_kind="CLAHE", 
+                       brightness=0, contrast=0, tracker_cfg="bytetrack.yaml"):
+    """Process single frame with tracking"""
+    proc = frame.copy()
+    
+    # Apply enhancement if requested
+    if enhance:
+        proc = apply_enhancement(proc, enhancement_kind, brightness=brightness, contrast=contrast)
+    
+    # Run tracking
+    detections = run_tracking(model, proc, tracker_cfg=tracker_cfg)
+    
+    # Annotate with boxes
+    annotated = box_annotator.annotate(scene=proc.copy(), detections=detections)
+    
+    # Create labels with tracker IDs
+    labels = []
+    tracker_ids = detections.tracker_id if detections.tracker_id is not None else [None] * len(detections)
+    for cid, conf, tid in zip(detections.class_id, detections.confidence, tracker_ids):
+        if tid is not None:
+            labels.append(f"#{tid} {model.names[cid]} {conf:0.2f}")
+        else:
+            labels.append(f"{model.names[cid]} {conf:0.2f}")
+    
+    # Annotate with labels
+    annotated = label_annotator.annotate(scene=annotated, detections=detections, labels=labels)
+    
+    return annotated, detections, labels
+
+def process_video(input_path, output_path, process_func):
+    """Generic video processing function"""
+    cap = cv2.VideoCapture(str(input_path))
+    if not cap.isOpened():
+        return None, "Failed to open video"
+    
+    w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+    h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+    fps = cap.get(cv2.CAP_PROP_FPS) or 25.0
+    
+    # Try different codecs for compatibility
+    codecs_to_try = ["avc1", "H264", "X264", "mp4v"]
+    writer = None
+    
+    for codec in codecs_to_try:
+        try:
+            fourcc = cv2.VideoWriter_fourcc(*codec)
+            writer = cv2.VideoWriter(str(output_path), fourcc, fps, (w, h))
+            if writer.isOpened():
+                break
+        except:
+            continue
+    
+    if writer is None or not writer.isOpened():
+        fourcc = cv2.VideoWriter_fourcc(*"mp4v")
+        writer = cv2.VideoWriter(str(output_path), fourcc, fps, (w, h))
+    
+    frame_count = 0
+    results = {}
+    
+    while True:
+        ret, frame = cap.read()
+        if not ret:
+            break
+        
+        # Process frame using provided function
+        processed_frame, frame_results = process_func(frame, frame_count)
+        writer.write(processed_frame)
+        
+        # Update results
+        if frame_results:
+            for key, value in frame_results.items():
+                results[key] = value
+        
+        frame_count += 1
+    
+    cap.release()
+    writer.release()
+    
+    results["frames_processed"] = frame_count
+    return results, None
+
+# ============================================================================
+# ENDPOINT 1: DETECT
+# Supports: Photo & Video
+# Features: Detection only + Enhancement
+# ============================================================================
+
+@app.route("/detect", methods=["POST"])
+def detect():
+    """
+    Detect objects in image or video
+    Form params:
+    - file: image or video file
+    - enhance: true/false (optional, default: false)
+    - enhancement_kind: CLAHE/histogram/gamma (optional, default: CLAHE)
+    - brightness: int (optional, default: 0)
+    - contrast: int (optional, default: 0)
+    """
+    if "file" not in request.files:
+        return jsonify({"error": "file not found"}), 400
+    
+    file = request.files["file"]
+    enhance = request.form.get("enhance", "false").lower() == "true"
+    enhancement_kind = request.form.get("enhancement_kind", "CLAHE")
+    brightness = int(request.form.get("brightness", 0))
+    contrast = int(request.form.get("contrast", 0))
+    
+    # Check if video or image
+    if is_video_file(file):
+        # Process video
+        tmp_in_path = OUTPUT_DIR / f"tmp_in_{uuid.uuid4().hex}.mp4"
+        file.save(str(tmp_in_path))
+        
+        out_path = OUTPUT_DIR / f"detect_{uuid.uuid4().hex}.mp4"
+        
+        def process_func(frame, frame_idx):
+            annotated, detections = process_frame_detect(
+                frame, enhance, enhancement_kind, brightness, contrast
+            )
+            return annotated, {"detections_last_frame": len(detections)}
+        
+        results, err = process_video(tmp_in_path, out_path, process_func)
+        
+        # Cleanup
+        try:
+            tmp_in_path.unlink()
+        except:
+            pass
+        
+        if err:
+            return jsonify({"error": err}), 500
+        
+        return jsonify({
+            "type": "video",
+            "video_url": f"/video/{out_path.name}",
+            "frames_processed": results.get("frames_processed", 0),
+            "enhancement_applied": enhance
+        })
+    
+    else:
+        # Process image
+        img, err = read_image_from_request("file")
+        if err:
+            return jsonify({"error": err}), 400
+        
+        annotated, detections = process_frame_detect(
+            img, enhance, enhancement_kind, brightness, contrast
+        )
+        
+        return jsonify({
+            "type": "image",
+            "image": image_to_base64(annotated),
+            "detections": detections,
+            "total_detections": len(detections),
+            "enhancement_applied": enhance
+        })
+
+# ============================================================================
+# ENDPOINT 2: TRACK
+# Supports: Photo & Video
+# Features: Detection + Tracking + Enhancement
+# ============================================================================
+
 @app.route("/track", methods=["POST"])
-def track_only():
-    img, err = read_image_from_request("file")
-    if err: 
-        return jsonify({"error": err}), 400
-
+def track():
+    """
+    Track objects in image or video
+    Form params:
+    - file: image or video file
+    - enhance: true/false (optional, default: false)
+    - enhancement_kind: CLAHE/histogram/gamma (optional, default: CLAHE)
+    - brightness: int (optional, default: 0)
+    - contrast: int (optional, default: 0)
+    - tracker: bytetrack.yaml/botsort.yaml (optional, default: bytetrack.yaml)
+    """
+    if "file" not in request.files:
+        return jsonify({"error": "file not found"}), 400
+    
+    file = request.files["file"]
+    enhance = request.form.get("enhance", "false").lower() == "true"
+    enhancement_kind = request.form.get("enhancement_kind", "CLAHE")
+    brightness = int(request.form.get("brightness", 0))
+    contrast = int(request.form.get("contrast", 0))
     tracker_cfg = request.form.get("tracker", "bytetrack.yaml")
-    detections = run_tracking(model, img, tracker_cfg=tracker_cfg)
     
-    annotated = box_annotator.annotate(scene=img.copy(), detections=detections)
+    # Check if video or image
+    if is_video_file(file):
+        # Process video
+        tmp_in_path = OUTPUT_DIR / f"tmp_in_{uuid.uuid4().hex}.mp4"
+        file.save(str(tmp_in_path))
+        
+        out_path = OUTPUT_DIR / f"track_{uuid.uuid4().hex}.mp4"
+        
+        def process_func(frame, frame_idx):
+            annotated, detections, labels = process_frame_track(
+                frame, enhance, enhancement_kind, brightness, contrast, tracker_cfg
+            )
+            return annotated, {"detections_last_frame": len(detections)}
+        
+        results, err = process_video(tmp_in_path, out_path, process_func)
+        
+        # Cleanup
+        try:
+            tmp_in_path.unlink()
+        except:
+            pass
+        
+        if err:
+            return jsonify({"error": err}), 500
+        
+        return jsonify({
+            "type": "video",
+            "video_url": f"/video/{out_path.name}",
+            "frames_processed": results.get("frames_processed", 0),
+            "enhancement_applied": enhance,
+            "tracker": tracker_cfg
+        })
     
-    # Fixed: handle case when tracker_id is None
-    labels = []
-    tracker_ids = detections.tracker_id if detections.tracker_id is not None else [None] * len(detections)
-    for cid, conf, tid in zip(detections.class_id, detections.confidence, tracker_ids):
-        if tid is not None:
-            labels.append(f"#{tid} {model.names[cid]} {conf:0.2f}")
-        else:
-            labels.append(f"{model.names[cid]} {conf:0.2f}")
-    
-    annotated = label_annotator.annotate(scene=annotated, detections=detections, labels=labels)
+    else:
+        # Process image
+        img, err = read_image_from_request("file")
+        if err:
+            return jsonify({"error": err}), 400
+        
+        annotated, detections, labels = process_frame_track(
+            img, enhance, enhancement_kind, brightness, contrast, tracker_cfg
+        )
+        
+        return jsonify({
+            "type": "image",
+            "image": image_to_base64(annotated),
+            "num_detections": len(detections),
+            "enhancement_applied": enhance,
+            "tracker": tracker_cfg
+        })
 
-    return jsonify({
-        "image": image_to_base64(annotated),
-        "num_detections": len(detections)
-    })
+# ============================================================================
+# ENDPOINT 3: COUNT with REGION
+# Supports: Photo & Video
+# Features: Detection + Tracking + Counting + Enhancement
+# ============================================================================
 
-# --- Endpoint Line Counting ---
-@app.route("/count-line", methods=["POST"])
-def count_line():
-    img, err = read_image_from_request("file")
-    if err: 
-        return jsonify({"error": err}), 400
+@app.route("/count", methods=["POST"])
+def count():
+    """
+    Count objects crossing a line or inside polygon
+    Form params:
+    - file: image or video file
+    - region_type: line/polygon (required)
+    - polygon_id: required if region_type=polygon
+    - enhance: true/false (optional, default: false)
+    - enhancement_kind: CLAHE/histogram/gamma (optional, default: CLAHE)
+    - brightness: int (optional, default: 0)
+    - contrast: int (optional, default: 0)
+    - tracker: bytetrack.yaml/botsort.yaml (optional, default: bytetrack.yaml)
+    """
+    if "file" not in request.files:
+        return jsonify({"error": "file not found"}), 400
     
-    # Create fresh line zone per request to avoid persistent counting
-    line_zone, line_annotator = create_line_zone()
-    
+    file = request.files["file"]
+    region_type = request.form.get("region_type", "line")
+    polygon_id = request.form.get("polygon_id", None)
+    enhance = request.form.get("enhance", "false").lower() == "true"
+    enhancement_kind = request.form.get("enhancement_kind", "CLAHE")
+    brightness = int(request.form.get("brightness", 0))
+    contrast = int(request.form.get("contrast", 0))
     tracker_cfg = request.form.get("tracker", "bytetrack.yaml")
-    detections = run_tracking(model, img, tracker_cfg=tracker_cfg)
-    line_zone.trigger(detections=detections)
-
-    annotated = box_annotator.annotate(scene=img.copy(), detections=detections)
     
-    labels = []
-    tracker_ids = detections.tracker_id if detections.tracker_id is not None else [None] * len(detections)
-    for cid, conf, tid in zip(detections.class_id, detections.confidence, tracker_ids):
-        if tid is not None:
-            labels.append(f"#{tid} {model.names[cid]} {conf:0.2f}")
+    # Validate region type
+    if region_type not in ["line", "polygon"]:
+        return jsonify({"error": "region_type must be 'line' or 'polygon'"}), 400
+    
+    # Setup counting zone
+    if region_type == "line":
+        counter_zone, zone_annotator = create_line_zone()
+    else:  # polygon
+        if not polygon_id or polygon_id not in POLYGON_ZONES:
+            return jsonify({"error": "polygon_id invalid or not provided"}), 400
+        counter_zone, zone_annotator = POLYGON_ZONES[polygon_id]
+    
+    # Check if video or image
+    if is_video_file(file):
+        # Process video
+        tmp_in_path = OUTPUT_DIR / f"tmp_in_{uuid.uuid4().hex}.mp4"
+        file.save(str(tmp_in_path))
+        
+        out_path = OUTPUT_DIR / f"count_{uuid.uuid4().hex}.mp4"
+        
+        def process_func(frame, frame_idx):
+            # Apply enhancement
+            proc = frame.copy()
+            if enhance:
+                proc = apply_enhancement(proc, enhancement_kind, brightness, contrast)
+            
+            # Track objects
+            detections = run_tracking(model, proc, tracker_cfg=tracker_cfg)
+            
+            # Trigger counting
+            counter_zone.trigger(detections=detections)
+            
+            # Annotate
+            annotated = box_annotator.annotate(scene=proc, detections=detections)
+            
+            # Labels
+            labels = []
+            tracker_ids = detections.tracker_id if detections.tracker_id is not None else [None] * len(detections)
+            for cid, conf, tid in zip(detections.class_id, detections.confidence, tracker_ids):
+                if tid is not None:
+                    labels.append(f"#{tid} {model.names[cid]} {conf:0.2f}")
+                else:
+                    labels.append(f"{model.names[cid]} {conf:0.2f}")
+            
+            annotated = label_annotator.annotate(scene=annotated, detections=detections, labels=labels)
+            
+            # Annotate counting zone
+            if region_type == "line":
+                zone_annotator.annotate(frame=annotated, line_counter=counter_zone)
+            else:
+                zone_annotator.annotate(frame=annotated, zone=counter_zone)
+            
+            # Return results
+            if region_type == "line":
+                return annotated, {
+                    "count_in": int(counter_zone.in_count),
+                    "count_out": int(counter_zone.out_count)
+                }
+            else:
+                return annotated, {
+                    "count": int(counter_zone.current_count)
+                }
+        
+        results, err = process_video(tmp_in_path, out_path, process_func)
+        
+        # Cleanup
+        try:
+            tmp_in_path.unlink()
+        except:
+            pass
+        
+        if err:
+            return jsonify({"error": err}), 500
+        
+        response = {
+            "type": "video",
+            "video_url": f"/video/{out_path.name}",
+            "frames_processed": results.get("frames_processed", 0),
+            "enhancement_applied": enhance,
+            "region_type": region_type,
+            "tracker": tracker_cfg
+        }
+        
+        if region_type == "line":
+            response.update({
+                "count_in": results.get("count_in", 0),
+                "count_out": results.get("count_out", 0)
+            })
         else:
-            labels.append(f"{model.names[cid]} {conf:0.2f}")
+            response.update({
+                "count": results.get("count", 0)
+            })
+        
+        return jsonify(response)
     
-    annotated = label_annotator.annotate(scene=annotated, detections=detections, labels=labels)
-    line_annotator.annotate(frame=annotated, line_counter=line_zone)
+    else:
+        # Process image
+        img, err = read_image_from_request("file")
+        if err:
+            return jsonify({"error": err}), 400
+        
+        # Apply enhancement
+        proc = img.copy()
+        if enhance:
+            proc = apply_enhancement(proc, enhancement_kind, brightness, contrast)
+        
+        # Track objects
+        detections = run_tracking(model, proc, tracker_cfg=tracker_cfg)
+        
+        # Trigger counting
+        counter_zone.trigger(detections=detections)
+        
+        # Annotate
+        annotated = box_annotator.annotate(scene=proc, detections=detections)
+        
+        # Labels
+        labels = []
+        tracker_ids = detections.tracker_id if detections.tracker_id is not None else [None] * len(detections)
+        for cid, conf, tid in zip(detections.class_id, detections.confidence, tracker_ids):
+            if tid is not None:
+                labels.append(f"#{tid} {model.names[cid]} {conf:0.2f}")
+            else:
+                labels.append(f"{model.names[cid]} {conf:0.2f}")
+        
+        annotated = label_annotator.annotate(scene=annotated, detections=detections, labels=labels)
+        
+        # Annotate counting zone
+        if region_type == "line":
+            zone_annotator.annotate(frame=annotated, line_counter=counter_zone)
+        else:
+            zone_annotator.annotate(frame=annotated, zone=counter_zone)
+        
+        response = {
+            "type": "image",
+            "image": image_to_base64(annotated),
+            "enhancement_applied": enhance,
+            "region_type": region_type,
+            "tracker": tracker_cfg
+        }
+        
+        if region_type == "line":
+            response.update({
+                "count_in": int(counter_zone.in_count),
+                "count_out": int(counter_zone.out_count)
+            })
+        else:
+            response.update({
+                "count": int(counter_zone.current_count)
+            })
+        
+        return jsonify(response)
 
-    return jsonify({
-        "image": image_to_base64(annotated),
-        "count_in": int(line_zone.in_count),
-        "count_out": int(line_zone.out_count)
-    })
+# ============================================================================
+# POLYGON MANAGEMENT
+# ============================================================================
 
-# --- Endpoint Polygon Counter ---
-POLYGON_ZONES = {}
-
-@app.route("/create-polygon", methods=["POST"])
+@app.route("/polygon/create", methods=["POST"])
 def create_polygon():
+    """
+    Create a polygon zone for counting
+    JSON body:
+    - points: array of [x, y] coordinates
+    Example: {"points": [[100, 100], [200, 100], [200, 200], [100, 200]]}
+    """
     data = request.get_json(force=True)
     points = data.get("points")
     if not points or not isinstance(points, list):
         return jsonify({"error": "points must be list of [x,y] pairs"}), 400
     
     try:
-        # Convert to numpy array format expected by supervision
         points_array = np.array(points, dtype=np.int32)
         poly, annot = create_polygon_zone(points_array)
         pid = uuid.uuid4().hex
         POLYGON_ZONES[pid] = (poly, annot)
-        return jsonify({"polygon_id": pid})
+        return jsonify({
+            "polygon_id": pid,
+            "message": "Polygon created successfully"
+        })
     except Exception as e:
         return jsonify({"error": f"Failed to create polygon: {str(e)}"}), 400
 
-@app.route("/count-polygon/<polygon_id>", methods=["POST"])
-def count_polygon(polygon_id):
-    if polygon_id not in POLYGON_ZONES:
-        return jsonify({"error": "polygon_id not found"}), 404
-    
-    poly, annot = POLYGON_ZONES[polygon_id]
-    img, err = read_image_from_request("file")
-    if err: 
-        return jsonify({"error": err}), 400
-    
-    tracker_cfg = request.form.get("tracker", "bytetrack.yaml")
-    detections = run_tracking(model, img, tracker_cfg=tracker_cfg)
-    poly.trigger(detections=detections)
-
-    annotated = box_annotator.annotate(scene=img.copy(), detections=detections)
-    
-    labels = []
-    tracker_ids = detections.tracker_id if detections.tracker_id is not None else [None] * len(detections)
-    for cid, conf, tid in zip(detections.class_id, detections.confidence, tracker_ids):
-        if tid is not None:
-            labels.append(f"#{tid} {model.names[cid]} {conf:0.2f}")
-        else:
-            labels.append(f"{model.names[cid]} {conf:0.2f}")
-    
-    annotated = label_annotator.annotate(scene=annotated, detections=detections, labels=labels)
-    annot.annotate(frame=annotated, zone=poly)
-
+@app.route("/polygon/list", methods=["GET"])
+def list_polygons():
+    """List all created polygon zones"""
     return jsonify({
-        "image": image_to_base64(annotated),
-        "count_in": int(poly.current_count)
+        "polygons": list(POLYGON_ZONES.keys()),
+        "total": len(POLYGON_ZONES)
     })
 
-# --- Endpoint Process Video ---
-@app.route("/process-video", methods=["POST"])
-def process_video():
-    video_file = request.files.get("file")
-    if video_file is None:
-        return jsonify({"error": "file not provided"}), 400
+@app.route("/polygon/delete/<polygon_id>", methods=["DELETE"])
+def delete_polygon(polygon_id):
+    """Delete a polygon zone"""
+    if polygon_id in POLYGON_ZONES:
+        del POLYGON_ZONES[polygon_id]
+        return jsonify({"message": "Polygon deleted successfully"})
+    return jsonify({"error": "polygon_id not found"}), 404
 
-    enhance = request.form.get("enhance", "false").lower() == "true"
-    enhancement_kind = request.form.get("enhancement_kind", "CLAHE")
-    do_track = request.form.get("track", "false").lower() == "true"
-    count_mode = request.form.get("count_mode", "none")
-    polygon_id = request.form.get("polygon_id", None)
-
-    tmp_in_path = OUTPUT_DIR / f"tmp_in_{uuid.uuid4().hex}.mp4"
-    video_file.save(str(tmp_in_path))
-
-    cap = cv2.VideoCapture(str(tmp_in_path))
-    if not cap.isOpened():
-        return jsonify({"error": "Failed to open video"}), 500
-
-    w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-    h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-    fps = cap.get(cv2.CAP_PROP_FPS) or 25.0
-
-    # Try H264 codec first, fallback to mp4v if not available
-    out_path = OUTPUT_DIR / f"proc_{uuid.uuid4().hex}.mp4"
-
-    # Try different codecs for browser compatibility
-    codecs_to_try = ["avc1", "H264", "X264", "mp4v"]
-    writer = None
-
-    for codec in codecs_to_try:
-        try:
-            fourcc = cv2.VideoWriter_fourcc(*codec)
-            writer = cv2.VideoWriter(str(out_path), fourcc, fps, (w, h))
-            if writer.isOpened():
-                print(f"[video] Using codec: {codec}")
-                break
-        except:
-            continue
-
-    if writer is None or not writer.isOpened():
-        # Last resort: use default codec
-        fourcc = cv2.VideoWriter_fourcc(*"mp4v")
-        writer = cv2.VideoWriter(str(out_path), fourcc, fps, (w, h))
-        print(f"[video] Using fallback codec: mp4v")
-
-    line_zone = None
-    line_annot = None
-    poly_zone = None
-    poly_annot = None
-    
-    if count_mode == "line":
-        line_zone, line_annot = create_line_zone()
-    elif count_mode == "polygon":
-        if not polygon_id or polygon_id not in POLYGON_ZONES:
-            cap.release()
-            writer.release()
-            return jsonify({"error": "polygon_id invalid or not provided"}), 400
-        poly_zone, poly_annot = POLYGON_ZONES[polygon_id]
-
-    frame_idx = 0
-    while True:
-        ret, frame = cap.read()
-        if not ret:
-            break
-        
-        proc = frame.copy()
-        if enhance:
-            proc = apply_enhancement(proc, enhancement_kind)
-
-        if do_track:
-            det = run_tracking(model, proc)
-            proc = box_annotator.annotate(proc, det)
-            
-            labels = []
-            tracker_ids = det.tracker_id if det.tracker_id is not None else [None] * len(det)
-            for cid, conf, tid in zip(det.class_id, det.confidence, tracker_ids):
-                if tid is not None:
-                    labels.append(f"#{tid} {model.names[cid]} {conf:0.2f}")
-                else:
-                    labels.append(f"{model.names[cid]} {conf:0.2f}")
-            
-            proc = label_annotator.annotate(proc, det, labels)
-
-            if count_mode == "line" and line_zone is not None:
-                line_zone.trigger(detections=det)
-                line_annot.annotate(frame=proc, line_counter=line_zone)
-            elif count_mode == "polygon" and poly_zone is not None:
-                poly_zone.trigger(detections=det)
-                poly_annot.annotate(frame=proc, zone=poly_zone)
-
-        writer.write(proc)
-        frame_idx += 1
-
-    cap.release()
-    writer.release()
-
-    # Cleanup temp input file
-    try:
-        tmp_in_path.unlink()
-    except:
-        pass
-
-    # Return filename instead of base64 for better performance
-    result = {
-        "video_url": f"/video/{out_path.name}",
-        "frames_processed": frame_idx
-    }
-
-    if line_zone:
-        result.update({
-            "count_in": int(line_zone.in_count),
-            "count_out": int(line_zone.out_count)
-        })
-    if poly_zone:
-        result.update({
-            "count": int(poly_zone.current_count)
-        })
-
-    return jsonify(result)
-
-# --- Optional: Keep these for backward compatibility or file management ---
-@app.route("/outputs", methods=["GET"])
-def list_outputs():
-    files = [str(p.name) for p in OUTPUT_DIR.glob("*") if p.is_file()]
-    return jsonify({"files": files})
-
-@app.route("/download", methods=["GET"])
-def download_file():
-    filename = request.args.get("filename")
-    if not filename:
-        return jsonify({"error": "filename param required"}), 400
-
-    file_path = OUTPUT_DIR / filename
-    if not file_path.exists() or not file_path.is_file():
-        return jsonify({"error": "file not found"}), 404
-
-    return send_file(str(file_path), as_attachment=True)
+# ============================================================================
+# FILE MANAGEMENT
+# ============================================================================
 
 @app.route("/video/<filename>", methods=["GET"])
 def serve_video(filename):
-    """Serve video files with proper headers for browser playback"""
+    """Serve processed video files"""
     file_path = OUTPUT_DIR / filename
-    print(f"[video] Request for: {filename}")
-    print(f"[video] File path: {file_path}")
-    print(f"[video] File exists: {file_path.exists()}")
-
     if not file_path.exists() or not file_path.is_file():
-        print(f"[video] ERROR: File not found!")
         return jsonify({"error": "file not found"}), 404
-
-    print(f"[video] Serving video file")
+    
     return send_file(
         str(file_path),
         mimetype='video/mp4',
         as_attachment=False,
         download_name=filename
     )
+
+@app.route("/outputs", methods=["GET"])
+def list_outputs():
+    """List all output files"""
+    files = [str(p.name) for p in OUTPUT_DIR.glob("*") if p.is_file()]
+    return jsonify({"files": files, "total": len(files)})
+
+@app.route("/download/<filename>", methods=["GET"])
+def download_file(filename):
+    """Download a specific output file"""
+    file_path = OUTPUT_DIR / filename
+    if not file_path.exists() or not file_path.is_file():
+        return jsonify({"error": "file not found"}), 404
+    
+    return send_file(str(file_path), as_attachment=True)
+
+# ============================================================================
+# HEALTH CHECK
+# ============================================================================
+
+@app.route("/health", methods=["GET"])
+def health_check():
+    """API health check"""
+    return jsonify({
+        "status": "ok",
+        "endpoints": {
+            "detect": "/detect",
+            "track": "/track",
+            "count": "/count",
+            "polygon_create": "/polygon/create",
+            "polygon_list": "/polygon/list",
+            "polygon_delete": "/polygon/delete/<id>"
+        }
+    })
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000, debug=True)
