@@ -113,10 +113,10 @@ Project_Deep_Learning/
 **William Prasetyo Utomo**
 - GitHub: [@WyVern28](https://github.com/WyVern28)
 
-  **Ferdinand Putra Nugroho**
+**Ferdinand Putra Nugroho**
 - GitHub: [@dinandputra](https://github.com/dinandputra)
 
-  **Zaidaan Faros Noland**
+**Zaidaan Faros Noland**
 - GitHub: [@NolandDotU](https://github.com/NolandDotU)
 
 ---
