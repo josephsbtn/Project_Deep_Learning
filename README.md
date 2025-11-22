@@ -2,6 +2,8 @@
 
 clone the project with downloading the .zip or clone it with git.
 
+
+
 **Run the Frontend :**
 
 Enter the yolov11-frontend folder and run this command
@@ -13,6 +15,9 @@ and~~
 npm run dev
 
 while the run dev is running, you can click the localhost link. and will be readirect to your browser
+
+
+
 
 
 **Run the Backend :**
